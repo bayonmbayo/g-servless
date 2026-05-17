@@ -7,7 +7,7 @@
 
 ## Task Division
 
-| # | File(s) | Owner |
+| # | File(s) | Verantwortung |
 |---|---------|-------|
 | 1 | `functions/nodejs/` · `functions/python/` | **Mohamed Condé** |
 | 2 | `load-tests/*.js` | **Md Abid Hossain** |

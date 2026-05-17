@@ -1,5 +1,4 @@
 """
-TASK OWNER: Bayon Mbayo Musewa
 Analysis & Visualisation — reads real k6 --out json files.
 
 Folder layout (relative to this script in monitoring/):

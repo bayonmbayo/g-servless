@@ -1,5 +1,4 @@
 """
-TASK OWNER: Mohamed Condé
 Google Cloud Function — Python variant
 Mirrors the Node.js function so results are directly comparable.
 """

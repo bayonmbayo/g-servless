@@ -1,5 +1,4 @@
 /**
- * TASK OWNER: Md Abid Hossain
  * k6 Load Profile — COLD REQUEST
  * A single request after a long idle period; guarantees a cold start.
  * Run this after waiting ≥15 min since the last invocation.
@@ -8,11 +7,11 @@
  *   k6 run cold-request.js -e FUNCTION_URL=https://...
  */
 
-import http from 'k6/http';
 import { check } from 'k6';
+import http from 'k6/http';
 
 export const options = {
-  vus:        1,
+  vus: 1,
   iterations: 1,
 };
 
@@ -25,7 +24,7 @@ export default function () {
 
   check(res, {
     'status 200': (r) => r.status === 200,
-    'is cold':    (r) => r.json('cold') === true,
+    'is cold': (r) => r.json('cold') === true,
   });
 
   console.log(`Cold: ${res.json('cold')} | Duration: ${res.timings.duration.toFixed(1)} ms`);

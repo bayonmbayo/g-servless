@@ -1,5 +1,4 @@
 """
-TASK OWNER: Bayon Mbayo Musewa
 Metrics collection — pulls data from Google Cloud Monitoring.
 
 Confirmed working metrics (from diagnose_metrics.py):

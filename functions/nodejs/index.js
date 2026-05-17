@@ -1,5 +1,4 @@
 /**
- * TASK OWNER: Mohamed Condé
  * Google Cloud Function — Node.js variant
  * Measures cold start vs warm start latency
  */
