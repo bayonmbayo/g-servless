@@ -1,0 +1,4 @@
+google-cloud-monitoring==2.*
+numpy==2.*
+matplotlib==3.*
+pandas==2.*

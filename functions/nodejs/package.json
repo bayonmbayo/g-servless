@@ -1,0 +1,11 @@
+{
+  "name": "lcss-serverless-nodejs",
+  "version": "1.0.0",
+  "description": "Node.js Cloud Function for cold start analysis — LCSS TH Köln 2026",
+  "main": "index.js",
+  "engines": { "node": "20" },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.0.0",
+    "redis": "^4.6.0"
+  }
+}
