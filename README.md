@@ -5,155 +5,393 @@
 
 ---
 
-## Task Division
+## Team & Task Division
 
-| # | File(s) | Responsability |
-|---|---------|-------|
-| 1 | `functions/nodejs/` · `functions/python/` | **Mohamed Condé** |
-| 2 | `load-tests/*.js` | **Md Abid Hossain** |
-| 3 | `monitoring/collect_metrics.py` · `monitoring/analyze.py` | **Bayon Mbayo Musewa** |
+| # | Responsability | Files |
+|---|-------|-------|
+| 1 | **Mohamed Condé** | `functions/nodejs/` · `functions/python/` |
+| 2 | **Md Abid Hossain** | `load-tests/*.js` |
+| 3 | **Bayon Mbayo Musewa** | `monitoring/collect_metrics.py` · `monitoring/analyze.py` |
 
 ---
 
 ## Project Structure
 
 ```
-project/
+g-servless/
 ├── functions/
 │   ├── nodejs/
-│   │   ├── index.js          # Cloud Function — Node.js 20
+│   │   ├── index.js              # Cloud Function — Node.js 20
 │   │   └── package.json
 │   └── python/
-│       ├── main.py           # Cloud Function — Python 3.11
+│       ├── main.py               # Cloud Function — Python 3.12
 │       └── requirements.txt
 ├── load-tests/
-│   ├── cold-request.js       # Single isolated cold request
-│   ├── burst-load.js         # Repeated bursts with idle gaps
-│   ├── steady-load.js        # Constant low traffic
-│   └── spike-load.js         # Sudden surge to peak
+│   ├── cold-request.js           # Single isolated cold request
+│   ├── burst-load.js             # Repeated bursts with idle gaps
+│   ├── steady-load.js            # Constant low traffic
+│   └── spike-load.js             # Sudden surge to peak
 ├── monitoring/
-│   ├── collect_metrics.py    # Pull from Cloud Monitoring → CSV
-│   └── analyze.py            # Generate charts for IEEE report
+│   ├── collect_metrics.py        # Pull from Cloud Monitoring → CSV/JSON
+│   ├── analyze.py                # Generate charts for IEEE report
+│   ├── diagnose_metrics.py       # Debug: list available GCP metrics
+│   └── requirements.txt
+├── results/                      # k6 output — Node.js runs
+├── results-p/                    # k6 output — Python runs
 └── README.md
 ```
 
 ---
 
-## 1. Cloud Functions
+## Prerequisites
 
-**Goal**: Build and deploy two functionally identical REST APIs (Node.js and Python) that expose cold/warm metadata in every response.
+### 1. Google Cloud SDK (gcloud)
 
-### Routes
-| Route | Description |
-|-------|-------------|
-| `GET /health` | Returns `{ cold, runtime, uptime }` |
-| `GET /data`   | Firestore read/write + latency |
-| `GET /cache`  | Redis read/write + latency |
+Download and install from https://cloud.google.com/sdk/docs/install
 
-### Deploy (Node.js)
-```bash
-gcloud functions deploy lcss-nodejs \
-  --gen2 \
-  --runtime nodejs20 \
-  --trigger-http \
-  --allow-unauthenticated \
-  --source functions/nodejs \
-  --entry-point handler \
-  --set-env-vars REDIS_URL=redis://...
+```powershell
+# Verify installation
+gcloud --version
+
+# Login with your Google account
+gcloud auth login
+gcloud auth application-default login   # required for Python scripts
+
+# Set the project
+gcloud config set project g-servless
 ```
 
-### Deploy (Python)
-```bash
-gcloud functions deploy lcss-python \
-  --gen2 \
-  --runtime python311 \
-  --trigger-http \
-  --allow-unauthenticated \
-  --source functions/python \
-  --entry-point handler \
-  --set-env-vars REDIS_URL=redis://...
+### 2. Node.js (v20+)
+
+Download from https://nodejs.org
+
+```powershell
+node --version    # should print v20.x.x or higher
+npm --version
+```
+
+### 3. Python (3.11+)
+
+Download from https://python.org
+
+```powershell
+python --version  # should print 3.11.x or higher
+```
+
+Install Python dependencies for monitoring scripts:
+
+```powershell
+cd monitoring
+pip install -r requirements.txt
+```
+
+`requirements.txt` contains:
+```
+google-cloud-monitoring==2.*
+numpy==2.*
+matplotlib==3.*
+pandas==2.*
+```
+
+### 4. k6 Load Testing Tool
+
+```powershell
+# Windows (with Chocolatey)
+choco install k6 -y
+
+# Verify
+k6 version
+```
+
+If you don't have Chocolatey, download the k6 installer directly from:
+https://github.com/grafana/k6/releases
+
+---
+
+## GCP Setup (one-time, done by project owner)
+
+### 1. Enable required APIs
+
+```powershell
+gcloud services enable `
+  cloudfunctions.googleapis.com `
+  cloudbuild.googleapis.com `
+  run.googleapis.com `
+  firestore.googleapis.com `
+  redis.googleapis.com `
+  monitoring.googleapis.com
+```
+
+### 2. Create Firestore database
+
+```powershell
+gcloud firestore databases create --location=europe-west1
+```
+
+> Note: use `--location`, not `--region` (common mistake).
+
+### 3. Create Redis instance (Memorystore)
+
+```powershell
+gcloud redis instances create lcss-redis `
+  --size=1 `
+  --region=europe-west1 `
+  --tier=BASIC
+```
+
+Get the Redis IP address (needed for the function deploy):
+
+```powershell
+gcloud redis instances describe lcss-redis `
+  --region=europe-west1 `
+  --format="value(host)"
+```
+
+> Redis is only reachable from within GCP — your functions and Redis must be
+> in the same project and region.
+
+### 4. Grant team members access
+
+The project owner must run this for each team member:
+
+```powershell
+# Replace with each member's Google account email
+gcloud projects add-iam-policy-binding g-servless `
+  --member="user:teammate@gmail.com" `
+  --role="roles/monitoring.viewer"
+
+# Also grant Cloud Functions invoker if needed
+gcloud projects add-iam-policy-binding g-servless `
+  --member="user:teammate@gmail.com" `
+  --role="roles/cloudfunctions.invoker"
 ```
 
 ---
 
-## 2. Load Testing
+## 1. Deploy Cloud Functions (Mohamed)
 
-**Goal**: Design and run all four k6 load profiles, export JSON summaries.
+### Node.js
 
-### Run a profile
-```bash
-# Set your deployed function URL
-export FUNCTION_URL=https://europe-west1-YOUR_PROJECT.cloudfunctions.net/lcss-nodejs
+```powershell
+cd functions/nodejs
+npm install
 
-# Cold request (run after ≥15 min idle)
-k6 run load-tests/cold-request.js -e FUNCTION_URL=$FUNCTION_URL
-
-# Steady load
-k6 run load-tests/steady-load.js  -e FUNCTION_URL=$FUNCTION_URL \
-   --out json=results/steady_nodejs.json
-
-# Spike load
-k6 run load-tests/spike-load.js   -e FUNCTION_URL=$FUNCTION_URL \
-   --out json=results/spike_nodejs.json
-
-# Burst load
-k6 run load-tests/burst-load.js   -e FUNCTION_URL=$FUNCTION_URL \
-   --out json=results/burst_nodejs.json
+gcloud functions deploy lcss-nodejs `
+  --gen2 `
+  --runtime nodejs20 `
+  --region europe-west1 `
+  --trigger-http `
+  --allow-unauthenticated `
+  --entry-point handler `
+  --source . `
+  --memory 256MB `
+  --timeout 30s `
+  --set-env-vars REDIS_URL=redis://YOUR_REDIS_IP:6379
 ```
-Repeat for the Python function URL.
 
-### Key custom metrics
-- `cold_start_count` — total cold starts detected
-- `cold_start_duration_ms` — latency of cold requests
-- `warm_start_duration_ms` — latency of warm requests
+### Python
+
+```powershell
+cd functions/python
+
+gcloud functions deploy lcss-python `
+  --gen2 `
+  --runtime python312 `
+  --region europe-west1 `
+  --trigger-http `
+  --allow-unauthenticated `
+  --entry-point handler `
+  --source . `
+  --memory 256MB `
+  --timeout 30s `
+  --set-env-vars REDIS_URL=redis://YOUR_REDIS_IP:6379
+```
+
+### Get function URLs
+
+```powershell
+gcloud functions describe lcss-nodejs `
+  --region europe-west1 `
+  --format="value(serviceConfig.uri)"
+
+gcloud functions describe lcss-python `
+  --region europe-west1 `
+  --format="value(serviceConfig.uri)"
+```
+
+### Smoke test
+
+```powershell
+curl https://YOUR_NODEJS_URL/health
+# Expected: {"status":"ok","runtime":"nodejs","cold":true,...}
+
+curl https://YOUR_PYTHON_URL/health
+# Expected: {"status":"ok","runtime":"python","cold":true,...}
+```
+
+### Response fields explained
+
+| Field | Meaning |
+|-------|---------|
+| `cold: true` | This was a cold start (container freshly booted) |
+| `cold: false` | Instance was already warm |
+| `coldStartAge` | ms since the container was initialised |
+| `handlerDurationMs` | Time the handler itself took (excludes boot time) |
+
+> The total cold start penalty is measured by k6 as `res.timings.duration`,
+> not by `handlerDurationMs`.
 
 ---
 
-## 3. Monitoring & Analysis
+## 2. Load Testing (Abid)
 
-**Goal**: Collect Cloud Monitoring metrics after each run, produce charts for the report.
+### Setup
 
-### Collect metrics
-```bash
-pip install google-cloud-monitoring numpy matplotlib pandas
+```powershell
+# Create output folders
+New-Item -ItemType Directory -Force -Path results
+New-Item -ItemType Directory -Force -Path results-p
 
-python monitoring/collect_metrics.py \
-  --project YOUR_GCP_PROJECT \
-  --profile spike \
-  --runtime nodejs \
-  --hours 1
+# Set function URLs
+$env:NODEJS_URL = $(gcloud functions describe lcss-nodejs `
+  --region europe-west1 --format="value(serviceConfig.uri)")
 
-# Repeat for all profile × runtime combinations
+$env:PYTHON_URL = $(gcloud functions describe lcss-python `
+  --region europe-west1 --format="value(serviceConfig.uri)")
 ```
 
-### Generate charts
-```bash
-python monitoring/analyze.py
-# → figures/mean_exec_time.pdf
-# → figures/latency_spread.pdf
-# → figures/cold_start_ratio.pdf
+### Run Node.js profiles
+
+Always run cold request first, after ≥15 min idle:
+
+```powershell
+# 1. Cold request — wait 15+ min after last invocation
+k6 run load-tests/cold-request.js -e FUNCTION_URL=$env:NODEJS_URL
+
+# 2. Steady load
+k6 run load-tests/steady-load.js `
+  -e FUNCTION_URL=$env:NODEJS_URL `
+  --out json=results/steady_nodejs.json
+
+# 3. Spike load
+k6 run load-tests/spike-load.js `
+  -e FUNCTION_URL=$env:NODEJS_URL `
+  --out json=results/spike_nodejs.json
+
+# 4. Burst load
+k6 run load-tests/burst-load.js `
+  -e FUNCTION_URL=$env:NODEJS_URL `
+  --out json=results/burst_nodejs.json
 ```
 
-### Metrics collected
+### Run Python profiles
+
+```powershell
+k6 run load-tests/steady-load.js `
+  -e FUNCTION_URL=$env:PYTHON_URL `
+  --out json=results-p/steady_nodejs.json
+
+k6 run load-tests/spike-load.js `
+  -e FUNCTION_URL=$env:PYTHON_URL `
+  --out json=results-p/spike_nodejs.json
+
+k6 run load-tests/burst-load.js `
+  -e FUNCTION_URL=$env:PYTHON_URL `
+  --out json=results-p/burst_nodejs.json
+```
+
+### Key custom metrics in k6 output
+
 | Metric | Description |
 |--------|-------------|
-| `function/execution_times` | Full distribution of execution durations |
-| `function/instance_count` | Number of active instances (scaling events) |
+| `cold_start_count` | Total cold starts detected |
+| `cold_start_duration_ms` | Latency of cold requests |
+| `warm_start_duration_ms` | Latency of warm requests |
+| `http_req_duration` | Full round-trip latency (most important) |
 
 ---
 
-## Research Questions (from pitch)
+## 3. Monitoring & Analysis (Bayon)
 
-1. How do spike / steady / burst load profiles affect cold start frequency?
-2. Is there a measurable latency difference between Node.js and Python?
-3. Can periodic warm-up pings meaningfully reduce cold start overhead?
+### Collect metrics from Cloud Monitoring
+
+Run after each k6 test (while data is still within the time window):
+
+```powershell
+cd monitoring
+
+# Collect for each profile × runtime combination
+python collect_metrics.py --project g-servless --profile spike  --runtime nodejs --hours 3
+python collect_metrics.py --project g-servless --profile burst  --runtime nodejs --hours 3
+python collect_metrics.py --project g-servless --profile steady --runtime nodejs --hours 3
+python collect_metrics.py --project g-servless --profile spike  --runtime python --hours 3
+python collect_metrics.py --project g-servless --profile burst  --runtime python --hours 3
+python collect_metrics.py --project g-servless --profile steady --runtime python --hours 3
+```
+
+> Tip: run collect_metrics.py **immediately after** each k6 test, before
+> the data ages out of the 1-hour default window.
+
+### Generate charts
+
+```powershell
+cd monitoring
+python analyze.py
+```
+
+Produces in `monitoring/figures/`:
+
+| File | Chart |
+|------|-------|
+| `cold_start_count.pdf` | Cold starts per load profile |
+| `cold_vs_warm_latency.pdf` | P50 / P95 cold vs warm per profile |
+| `mean_exec_time.pdf` | Mean response time by profile × runtime |
+| `cold_start_ratio.pdf` | Cold ÷ warm latency overhead ratio |
+
+### Diagnose missing metrics
+
+If `collect_metrics.py` returns nulls, run the diagnostic first:
+
+```powershell
+python diagnose_metrics.py --project g-servless --hours 6
+```
+
+This lists every available metric with point counts so you can see
+exactly what data exists in GCP.
+
+---
+
+## Research Questions
+
+| # | Question |
+|---|---------|
+| RQ1 | How do spike / steady / burst load profiles affect cold start frequency? |
+| RQ2 | Is there a measurable latency difference between Node.js and Python? |
+| RQ3 | Can periodic warm-up pings meaningfully reduce cold start overhead? |
 
 ---
 
 ## Tech Stack
-- **Compute**: Google Cloud Functions (2nd gen)
-- **Database**: Firestore
-- **Cache**: Redis (Memorystore)
-- **Load testing**: k6
-- **Observability**: Cloud Monitoring + Cloud Logging
-- **Report**: IEEE LaTeX template
+
+| Layer | Tool |
+|-------|------|
+| Compute | Google Cloud Functions 2nd gen (Cloud Run) |
+| Database | Firestore (`europe-west1`) |
+| Cache | Redis — Memorystore Basic tier |
+| Load testing | k6 |
+| Observability | Cloud Monitoring + Cloud Logging |
+| Analysis | Python — pandas, numpy, matplotlib |
+| Report | IEEE LaTeX template |
+
+---
+
+## Common Errors & Fixes
+
+| Error | Fix |
+|-------|-----|
+| `--region` not recognised for Firestore | Use `--location` instead |
+| `PERMISSION_DENIED` in collect_metrics.py | Run `gcloud auth application-default login` |
+| `ALIGN_PERCENTILE_99` invalid for instance_count | Use `ALIGN_MEAN` for GAUGE/INT64 metrics |
+| execution_times values in billions | Values are in nanoseconds — divide by 1,000,000 for ms |
+| k6 `cold: false` on first request | Function was pre-warmed by GCP — wait 15+ min and retry |
+| `results/` folder not found | Run `New-Item -ItemType Directory -Force -Path results` |
