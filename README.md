@@ -287,6 +287,8 @@ k6 run load-tests/burst-load.js `
 ### Run Python profiles
 
 ```powershell
+k6 run load-tests/cold-request.js -e FUNCTION_URL=$env:PYTHON_URL
+
 k6 run load-tests/steady-load.js `
   -e FUNCTION_URL=$env:PYTHON_URL `
   --out json=results-p/steady_nodejs.json
